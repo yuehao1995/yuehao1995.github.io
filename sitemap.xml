@@ -3,21 +3,37 @@
   xmlns:xhtml="http://www.w3.org/1999/xhtml">
   
   <url>
-    <loc>yuehao1995.github.io/archives/</loc>
+    <loc>yuehao1995.github.io/tags/</loc>
+    <lastmod>2019-06-16T14:15:44+08:00</lastmod>
+    <priority>0</priority>
   </url>
   
   <url>
     <loc>yuehao1995.github.io/categories/</loc>
+    <lastmod>2019-06-16T14:15:44+08:00</lastmod>
+    <priority>0</priority>
+  </url>
+  
+  <url>
+    <loc>yuehao1995.github.io/archives/</loc>
+    <lastmod>2019-06-16T14:15:44+08:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>yuehao1995.github.io/categories/</loc>
+    <lastmod>2019-06-16T14:15:44+08:00</lastmod>
     <priority>0</priority>
   </url>
   
   <url>
     <loc>yuehao1995.github.io/tags/</loc>
+    <lastmod>2019-06-16T14:15:44+08:00</lastmod>
     <priority>0</priority>
   </url>
   
   <url>
     <loc>yuehao1995.github.io/</loc>
+    <lastmod>2019-06-16T14:15:44+08:00</lastmod>
     <priority>0</priority>
   </url>
   
