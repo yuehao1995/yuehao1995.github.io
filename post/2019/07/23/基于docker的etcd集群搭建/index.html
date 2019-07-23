@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+
+    <meta charset="utf-8">
+    <meta name="generator" content="Hugo 0.55.6" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <title>基于Docker的Etcd集群搭建 | 张岳灏的博客</title>
+    <meta property="og:title" content="基于Docker的Etcd集群搭建 - 张岳灏的博客">
+    <meta property="og:type" content="article">
+        
+    <meta property="article:published_time" content="2019-07-23T16:21:48&#43;08:00">
+        
+        
+    <meta property="article:modified_time" content="2019-07-23T16:21:48&#43;08:00">
+        
+    <meta name="Keywords" content="golang,go语言,go语言笔记,张岳灏,java,python,c,博客,计算机基础,计算机网络,操作系统,自动部署">
+    <meta name="description" content="基于Docker的Etcd集群搭建">
+        <meta name="author" content="张岳灏">
+        
+    <meta property="og:url" content="https://yuehao1995.github.io/post/2019/07/23/%E5%9F%BA%E4%BA%8Edocker%E7%9A%84etcd%E9%9B%86%E7%BE%A4%E6%90%AD%E5%BB%BA/">
+    <link rel="shortcut icon" href="/favicon.ico" type="image/x-icon">
+
+    <link rel="stylesheet" href="/css/normalize.css">
+    
+        <link rel="stylesheet" href="/css/prism.css">
+    
+    <link rel="stylesheet" href="/css/style.css">
+    <script type="text/javascript" src="//cdn.bootcss.com/jquery/3.2.1/jquery.min.js"></script>
+
+    
+
+
+    
+    
+</head>
+
+<body>
+<header id="header" class="clearfix">
+    <div class="container">
+        <div class="col-group">
+            <div class="site-name ">
+                
+                    <a id="logo" href="https://yuehao1995.github.io">
+                        张岳灏的博客
+                    </a>
+                
+                <p class="description">专注于Go语言(golang)、在学习c,python及计算机网络,操作系统，unix高级编程，英语等</p>
+            </div>
+            <div>
+                <nav id="nav-menu" class="clearfix">
+                    <a class="current" href="https://yuehao1995.github.io">首页</a>
+                    
+                    <a  href="https://yuehao1995.github.io/books/" title="读书笔记">读书笔记</a>
+                    
+                    <a  href="https://yuehao1995.github.io/archives/" title="归档">归档</a>
+                    
+                    <a  href="https://yuehao1995.github.io/about/" title="关于">关于</a>
+                    
+                </nav>
+            </div>
+        </div>
+    </div>
+</header>
+
+
+<div id="body">
+    <div class="container">
+        <div class="col-group">
+
+            <div class="col-8" id="main">
+                <div class="res-cons">
+                    <article class="post">
+                        <header>
+                            <h1 class="post-title">基于Docker的Etcd集群搭建</h1>
+                        </header>
+                        <date class="post-meta meta-date">
+                            2019年7月23日
+                        </date>
+                        
+                        <div class="post-meta">
+                            <span>|</span>
+                            
+                                <span class="meta-category"><a href="https://yuehao1995.github.io/categories/"></a></span>
+                            
+                        </div>
+                        
+                        
+                        
+                        <div class="post-content">
+                            
+
+<h1 id="cfssl的使用">cfssl的使用</h1>
+
+<h2 id="下载cfssl可执行文件">下载cfssl可执行文件</h2>
+
+<p>到<code>https://pkg.cfssl.org</code>下载相应系统的<code>cfssl</code>与<code>cfssljson</code></p>
+
+<h2 id="生成根证书">生成根证书</h2>
+
+<h3 id="创建ca配置文件">创建ca配置文件</h3>
+
+<p>ca-config.json</p>
+
+<pre><code class="language-json">{
+    &quot;signing&quot;: {
+        &quot;default&quot;: {
+            &quot;expiry&quot;: &quot;87600h&quot;
+        },
+        &quot;profiles&quot;: {
+            &quot;server&quot;: {
+                &quot;expiry&quot;: &quot;87600h&quot;,
+                &quot;usages&quot;: [
+                    &quot;signing&quot;,
+                    &quot;key encipherment&quot;,
+                    &quot;server auth&quot;,
+                    &quot;client auth&quot;
+                ]
+            },
+            &quot;client&quot;: {
+                &quot;expiry&quot;: &quot;87600h&quot;,
+                &quot;usages&quot;: [
+                    &quot;signing&quot;,
+                    &quot;key encipherment&quot;,
+                    &quot;client auth&quot;
+                ]
+            },
+            &quot;peer&quot;: {
+                &quot;expiry&quot;: &quot;87600h&quot;,
+                &quot;usages&quot;: [
+                    &quot;signing&quot;,
+                    &quot;key encipherment&quot;,
+                    &quot;server auth&quot;,
+                    &quot;client auth&quot;
+                ]
+            }
+        }
+    }
+}
+</code></pre>
+
+<h3 id="创建ca证书签名请求">创建CA证书签名请求</h3>
+
+<p>ca-csr.json</p>
+
+<pre><code>{
+    &quot;CN&quot;: &quot;EECHAIN CA&quot;,
+    &quot;key&quot;: {
+        &quot;algo&quot;: &quot;rsa&quot;,
+        &quot;size&quot;: 2048
+    },
+    &quot;names&quot;: [
+        {
+            &quot;C&quot;: &quot;CN&quot;,
+            &quot;L&quot;: &quot;CA&quot;,
+            &quot;O&quot;: &quot;eechain.com&quot;,
+            &quot;ST&quot;: &quot;BeiJing&quot;,
+            &quot;OU&quot;: &quot;etcd-cluster&quot;
+        }
+    ]
+}
+</code></pre>
+
+<p>生成ca根证书</p>
+
+<pre><code>cfssl gencert -initca ca-csr.json | cfssljson -bare ca -
+</code></pre>
+
+<h2 id="生成server端证书">生成server端证书</h2>
+
+<h3 id="创建server端配置文件">创建server端配置文件</h3>
+
+<p>server.json</p>
+
+<pre><code>{
+    &quot;CN&quot;: &quot;server&quot;,
+    &quot;hosts&quot;: [
+        &quot;localhost&quot;, 
+        &quot;0.0.0.0&quot;, 
+        &quot;127.0.0.1&quot;,
+        &quot;192.16.32.89&quot;,
+        &quot;192.16.32.87&quot;
+    ],
+    &quot;key&quot;: {
+        &quot;algo&quot;: &quot;ecdsa&quot;,
+        &quot;size&quot;: 256
+    },
+    &quot;names&quot;: [
+        {
+            &quot;C&quot;: &quot;CN&quot;,
+            &quot;ST&quot;: &quot;CA&quot;,
+            &quot;L&quot;: &quot;BeiJing&quot;
+        }
+    ]
+}
+</code></pre>
+
+<p>生成服务端证书</p>
+
+<pre><code>cfssl gencert -ca=ca.pem -ca-key=ca-key.pem -config=ca-config.json -profile=server server.json | cfssljson -bare server
+</code></pre>
+
+<h2 id="生成节点证书">生成节点证书</h2>
+
+<h3 id="创建各个节点配置文件">创建各个节点配置文件</h3>
+
+<p>member[i].json</p>
+
+<pre><code>{
+    &quot;CN&quot;: &quot;member1&quot;,
+    &quot;hosts&quot;: [
+        &quot;192.16.32.89&quot;,
+        &quot;127.0.0.1&quot;,
+        &quot;etcd.ee-chain.com1&quot;,
+        &quot;member1&quot;
+    ],
+    &quot;key&quot;: {
+        &quot;algo&quot;: &quot;ecdsa&quot;,
+        &quot;size&quot;: 256
+    },
+    &quot;names&quot;: [
+        {
+            &quot;C&quot;: &quot;US&quot;,
+            &quot;ST&quot;: &quot;CA&quot;,
+            &quot;L&quot;: &quot;San Francisco&quot;
+        }
+    ]
+}
+</code></pre>
+
+<p>生成节点证书</p>
+
+<pre><code>cfssl gencert -ca=ca.pem -ca-key=ca-key.pem -config=ca-config.json -profile=peer member1.json | cfssljson -bare member1
+</code></pre>
+
+<h2 id="生成客户端证书">生成客户端证书</h2>
+
+<h3 id="创建客户端配置文件">创建客户端配置文件</h3>
+
+<p>client.json</p>
+
+<pre><code>{
+    &quot;CN&quot;: &quot;client&quot;,
+    &quot;hosts&quot;: [&quot;&quot;],
+    &quot;key&quot;: {
+        &quot;algo&quot;: &quot;ecdsa&quot;,
+        &quot;size&quot;: 256
+    },
+    &quot;names&quot;: [
+        {
+            &quot;C&quot;: &quot;CN&quot;,
+            &quot;ST&quot;: &quot;CA&quot;,
+            &quot;L&quot;: &quot;BeiJing&quot;
+        }
+    ]
+}
+</code></pre>
+
+<p>生成客户端证书</p>
+
+<pre><code>cfssl gencert -ca=ca.pem -ca-key=ca-key.pem -config=ca-config.json -profile=client client.json | cfssljson -bare client
+</code></pre>
+
+<h1 id="各个etcd节点的启动">各个etcd节点的启动</h1>
+
+<p>对各个节点，改掉THIS_NAME与THIS_IP，然后启动</p>
+
+<pre><code class="language-bash">REGISTRY=quay.io/coreos/etcd
+ETCD_VERSION=latest
+TOKEN=my-etcd-token
+CLUSTER_STATE=new
+CLUSTER=etcd-node-1=https://192.16.32.89:2380,etcd-node-2=https://192.16.32.87:2380
+
+THIS_NAME=etcd-node-1
+THIS_IP=192.16.32.89
+func run(){
+ docker run -d -p 2379:2379 -p 2380:2380  \
+             --volume=${DATA_DIR}:/etcd-data          \
+             --volume=/opt/app/ebcgateway/etcd/cfssl:/etc/ssl/etcd    \
+             --name etcd ${REGISTRY}:${ETCD_VERSION}  \
+             /usr/local/bin/etcd                      \
+             --data-dir=/etcd-data                    \
+             --name ${THIS_NAME}                      \
+             --initial-advertise-peer-urls https://${THIS_IP}:2380 \
+             --listen-peer-urls https://0.0.0.0:2380 \
+             --advertise-client-urls https://${THIS_IP}:2379 \
+             --listen-client-urls https://0.0.0.0:2379 \
+             --initial-cluster-state ${CLUSTER_STATE} --initial-cluster-token ${TOKEN} \
+             --initial-cluster ${CLUSTER}   \
+             --cert-file=/etc/ssl/etcd/server.pem  \
+             --key-file=/etc/ssl/etcd/server-key.pem  \
+             --client-cert-auth  \
+             --trusted-ca-file=/etc/ssl/etcd/ca.pem \
+             --peer-client-cert-auth \
+             --peer-trusted-ca-file=/etc/ssl/etcd/ca.pem \
+             --peer-cert-file=/etc/ssl/etcd/{{PEER_NAME}}.pem   \
+             --peer-key-file=/etc/ssl/etcd/{{PEER_NAME}}-key.pem
+}
+</code></pre>
+
+<p>各个参数含义</p>
+
+<pre><code>* 客户端到服务器通信：*
+--cert-file = &lt;path&gt;：用于与etcd的SSL/TLS连接的证书。设置此选项时，advertise-client-urls可以使用HTTPS模式。
+--key-file = &lt;path&gt;：证书的密钥。必须未加密。
+--client-cert-auth：设置此选项后，etcd将检查所有来自受信任CA签署的客户端证书的传入HTTPS请求，因此不提供有效客户端证书的请求将失败。
+--trusted-ca-file = &lt;path&gt;：受信任的证书颁发机构。
+
+* 对等（服务器到服务器/集群）通信：*
+对等选项的工作方式与客户端到服务器选项的工作方式相同：
+--peer-cert-file = &lt;path&gt;：用于对等体之间SSL / TLS连接的证书。这将用于侦听对等体地址以及向其他对等体发送请求。
+--peer-key-file = &lt;path&gt;：证书的密钥。必须未加密。
+--peer-client-cert-auth：设置时，etcd将检查来自集群的所有传入对等请求，以获得由提供的CA签名的有效客户端证书。
+--peer-trusted-ca-file = &lt;path&gt;：受信任的证书颁发机构。
+</code></pre>
+
+<h1 id="测试">测试</h1>
+
+<ol>
+<li><p>在其中一个节点进入容器.</p>
+
+<pre><code class="language-bash">docker exec -it etcd /bin/sh
+</code></pre>
+
+<ul>
+<li><p>执行以下命令列出集群成员</p>
+
+<pre><code>ETCDCTL_API=3 etcdctl --cacert /etc/ssl/etcd/ca.pem --cert /etc/ssl/etcd/client.pem --key /etc/ssl/etcd/client-key.pem --endpoints=https://47.96.235.92:2379 member list
+</code></pre></li>
+
+<li><p>执行以下命令进行健康检查</p>
+
+<pre><code>etcdctl \
+--ca-file=/etc/ssl/etcd/ca.pem \
+--cert-file=/etc/ssl/etcd/server.pem \
+--key-file=/etc/ssl/etcd/server-key.pem \
+--endpoints=https://47.96.235.92:2379,https://192.16.32.89:2379\
+cluster-health
+</code></pre></li>
+
+<li><p>执行以下命令进行存取检查</p>
+
+<pre><code>ETCDCTL_API=3 etcdctl --cacert /etc/ssl/etcd/ca.pem --cert /etc/ssl/etcd/client.pem --key /etc/ssl/etcd/client-key.pem --endpoints=https://192.16.32.87:2379,https://192.16.32.89:2379 put firstname 'zhang'
+
+ETCDCTL_API=3 etcdctl --cacert /etc/ssl/etcd/ca.pem --cert /etc/ssl/etcd/client.pem --key /etc/ssl/etcd/client-key.pem --endpoints=https://192.16.32.87:2379,https://192.16.32.89:2379 get firstname 
+</code></pre></li>
+</ul>
+
+<ol>
+<li><p>在本地执行以下命令进行客户端请求验证.</p>
+
+<pre><code>curl --cacert /path/ca.pem --cert /path/client.pem --key /path/client-key.pem \
+-L https://192.16.32.87:2379/v2/keys/foo -XPUT -d value=bar -v
+</code></pre></li>
+</ol></li>
+</ol>
+
+                        </div>
+
+                        
+
+
+                        
+
+<div class="post-archive">
+    <h2>See Also</h2>
+    <ul class="listing">
+        
+        <li><a href="/about/">About</a></li>
+        
+        <li><a href="/archives/">Archives</a></li>
+        
+    </ul>
+</div>
+
+
+                        <div class="post-meta meta-tags">
+                            
+                            <ul class="clearfix">
+                                
+                                <li><a href="https://yuehao1995.github.io/tags/"></a></li>
+                                
+                            </ul>
+                            
+                        </div>
+                    </article>
+                    
+    
+
+    
+    
+                </div>
+            </div>
+            <div id="secondary">
+    <section class="widget">
+        <form id="search" action="//www.google.com/search" method="get" accept-charset="utf-8" target="_blank" _lpchecked="1">
+      
+      <input type="text" name="q" maxlength="20" placeholder="Search">
+      <input type="hidden" name="sitesearch" value="https://yuehao1995.github.io">
+      <button type="submit" class="submit icon-search"></button>
+</form>
+    </section>
+    
+    <section class="widget">
+        <h3 class="widget-title">最近文章</h3>
+<ul class="widget-list">
+    
+    <li>
+        <a href="https://yuehao1995.github.io/post/2019/07/23/%E5%87%A0%E7%A7%8Dio%E6%A8%A1%E5%9E%8B%E7%AD%89%E7%9A%84%E6%A6%82%E5%BF%B5%E4%B8%8E%E4%B8%8D%E5%90%8C/" title="几种IO模型等的概念与不同">几种IO模型等的概念与不同</a>
+    </li>
+    
+    <li>
+        <a href="https://yuehao1995.github.io/post/2019/07/23/linux%E7%9A%84%E7%BD%91%E7%BB%9C%E6%A8%A1%E5%9E%8B/" title="Linux的网络模型">Linux的网络模型</a>
+    </li>
+    
+    <li>
+        <a href="https://yuehao1995.github.io/post/2019/07/23/%E5%9F%BA%E4%BA%8Edocker%E7%9A%84etcd%E9%9B%86%E7%BE%A4%E6%90%AD%E5%BB%BA/" title="基于Docker的Etcd集群搭建">基于Docker的Etcd集群搭建</a>
+    </li>
+    
+</ul>
+    </section>
+
+    
+
+    <section class="widget">
+        <h3 class="widget-title">分类</h3>
+<ul class="widget-list">
+    
+    <li>
+        <a href="https://yuehao1995.github.io/categories//">(6)</a>
+    </li>
+    
+</ul>
+    </section>
+
+    <section class="widget">
+        <h3 class="widget-title">标签</h3>
+<div class="tagcloud">
+    
+    <a href="https://yuehao1995.github.io/tags//"></a>
+    
+</div>
+    </section>
+
+    
+
+    <section class="widget">
+        <h3 class="widget-title">其它</h3>
+        <ul class="widget-list">
+            <li><a href="https://yuehao1995.github.io/index.xml">文章 RSS</a></li>
+        </ul>
+    </section>
+</div>
+        </div>
+    </div>
+</div>
+<footer id="footer">
+    <div class="container">
+        &copy; 2019 <a href="https://yuehao1995.github.io">张岳灏的博客 By 张岳灏</a>.
+        Powered by <a rel="nofollow noreferer noopener" href="https://gohugo.io" target="_blank">Hugo</a>.
+        <a href="https://www.flysnow.org/" target="_blank">Theme</a> based on <a href="https://github.com/rujews/maupassant-hugo" target="_blank">maupassant</a>.
+        
+    </div>
+</footer>
+
+
+    <script type="text/javascript">
+    
+    (function(){
+        $("pre code").parent().addClass("line-numbers")
+    }())
+
+    window.MathJax = {
+        tex2jax: {
+            inlineMath: [ ['$','$'] ],
+            processEscapes: true
+        }
+    };
+    </script>
+    <script type="text/javascript" src="/js/prism.js" async="true"></script>
+    <script src='https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.5/MathJax.js?config=TeX-MML-AM_CHTML' async></script>
+
+<a id="rocket" href="#top"></a>
+<script type="text/javascript" src="/js/totop.js?v=0.0.0" async=""></script>
+
+
+
+
+
+
+</body>
+</html>
