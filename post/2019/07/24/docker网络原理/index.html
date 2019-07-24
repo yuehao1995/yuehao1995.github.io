@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+
+    <meta charset="utf-8">
+    <meta name="generator" content="Hugo 0.55.6" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <title>Docker网络原理 | 张岳灏的博客</title>
+    <meta property="og:title" content="Docker网络原理 - 张岳灏的博客">
+    <meta property="og:type" content="article">
+        
+    <meta property="article:published_time" content="2019-07-24T16:02:14&#43;08:00">
+        
+        
+    <meta property="article:modified_time" content="2019-07-24T16:02:14&#43;08:00">
+        
+    <meta name="Keywords" content="golang,go语言,go语言笔记,张岳灏,java,python,c,博客,计算机基础,计算机网络,操作系统,自动部署">
+    <meta name="description" content="Docker网络原理">
+        <meta name="author" content="张岳灏">
+        
+    <meta property="og:url" content="https://yuehao1995.github.io/post/2019/07/24/docker%E7%BD%91%E7%BB%9C%E5%8E%9F%E7%90%86/">
+    <link rel="shortcut icon" href="/favicon.ico" type="image/x-icon">
+
+    <link rel="stylesheet" href="/css/normalize.css">
+    
+        <link rel="stylesheet" href="/css/prism.css">
+    
+    <link rel="stylesheet" href="/css/style.css">
+    <script type="text/javascript" src="//cdn.bootcss.com/jquery/3.2.1/jquery.min.js"></script>
+
+    
+
+
+    
+    
+</head>
+
+<body>
+<header id="header" class="clearfix">
+    <div class="container">
+        <div class="col-group">
+            <div class="site-name ">
+                
+                    <a id="logo" href="https://yuehao1995.github.io">
+                        张岳灏的博客
+                    </a>
+                
+                <p class="description">专注于Go语言(golang)、在学习c,python及计算机网络,操作系统，unix高级编程，英语等</p>
+            </div>
+            <div>
+                <nav id="nav-menu" class="clearfix">
+                    <a class="current" href="https://yuehao1995.github.io">首页</a>
+                    
+                    <a  href="https://yuehao1995.github.io/books/" title="读书笔记">读书笔记</a>
+                    
+                    <a  href="https://yuehao1995.github.io/archives/" title="归档">归档</a>
+                    
+                    <a  href="https://yuehao1995.github.io/about/" title="关于">关于</a>
+                    
+                </nav>
+            </div>
+        </div>
+    </div>
+</header>
+
+
+<div id="body">
+    <div class="container">
+        <div class="col-group">
+
+            <div class="col-8" id="main">
+                <div class="res-cons">
+                    <article class="post">
+                        <header>
+                            <h1 class="post-title">Docker网络原理</h1>
+                        </header>
+                        <date class="post-meta meta-date">
+                            2019年7月24日
+                        </date>
+                        
+                        <div class="post-meta">
+                            <span>|</span>
+                            
+                                <span class="meta-category"><a href="https://yuehao1995.github.io/categories/docker">docker</a></span>
+                            
+                        </div>
+                        
+                        
+                        
+                        <div class="post-content">
+                            
+
+<h1 id="docker-网络原理">Docker 网络原理</h1>
+
+<h2 id="bridge模式">Bridge模式</h2>
+
+<h3 id="1-第一次启动时-网络变化">1 第一次启动时,网络变化</h3>
+
+<ol>
+<li>在centos上执行<code>ifconfig</code>可见:<br />
+创建了一个虚拟网卡docker0:<br />
+
+<ul>
+<li>ip为172.17.0.1。</li>
+<li>netmask255.255.0.0。<br /></li>
+</ul></li>
+
+<li><p>执行<code>route -n</code>可见:</p>
+
+<ul>
+<li><p>目标位172.17.0.0/16的地址由docker0网卡转发。</p>
+
+<h3 id="2-运行一个容器-网络变化">2 运行一个容器,网络变化</h3></li>
+</ul></li>
+
+<li><p>在容器中执行<code>ifconfig</code>可见:</p>
+
+<ul>
+<li>lo,回环网卡。</li>
+<li>eth0,通信网卡,ip 172.17.0.2与docker0在同一网段。</li>
+</ul></li>
+
+<li><p>在容器中执行<code>netstat -rn</code>可见:<br />
+容器的默认网关是172.17.0.1,即docker0网卡。</p></li>
+
+<li><p>在宿主机执行<code>ifconfig</code>可见:
+多了一条以veth开头的网卡。即我们在linux网络重的veth设备,而veth的另一个设备即是容器的eth0。</p>
+
+<h3 id="3-查看网桥">3 查看网桥</h3>
+
+<p>在宿主机运行<code>brctl show</code>可见:
+docker0是一条网桥，连接了veth设备的两边,配置了一个ip。所以容器可以与外界通信。</p>
+
+<h3 id="4-查看iptables">4 查看iptables</h3>
+
+<h4 id="4-0-docker启动-但容器未启动时-或容器未开启端口映射">4.0 docker启动,但容器未启动时，或容器未开启端口映射</h4>
+
+<p>执行<code>iptables-save</code>。<br />
+可见NAT表:</p>
+
+<pre><code class="language-bash">-A POSTROUTING -s 172.17.0.0/16 ! -o docker0 -j MASQUERADE
+</code></pre>
+
+<p>参数含义:</p>
+
+<pre><code>-s  :源地址172.17.0.0/16  
+! -o:指定数据报文流出接口不是docker0
+-j ：动作为MASQUERADE（地址伪装）
+</code></pre>
+
+<p>也就是说当从docker网络发出的数据目标地址不是docker0即外网时,做SNAT转换。</p>
+
+<p>Filter表:</p>
+
+<pre><code class="language-bash">-A FORWARD -o docker0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+</code></pre></li>
+</ol>
+
+<p>目标地址是docker0 连接状态是以前连接好的,可以直接通过。</p>
+
+<pre><code class="language-bash">-A FORWARD -i docker0 ! -o docker0 -j ACCEP
+</code></pre>
+
+<p>从dokcer网络发出,重定向到非doker网络是可以的。即允许docker访问外网</p>
+
+<pre><code class="language-bash">-A FORWARD -i docker0 -o docker0 -j ACCEPT
+</code></pre>
+
+<p>表示容器可以相互访问。</p>
+
+<h4 id="4-1-容器开始端口映射9091-9095">4.1 容器开始端口映射9091:9095</h4>
+
+<p>执行<code>iptables-save</code>。
+NAT表不同:</p>
+
+<pre><code class="language-bash">-A POSTROUTING -s 172.17.0.2/32 -d 172.17.0.2/32 -p tcp -m tcp --dport 9095 -j MASQUERADE
+-A DOCKER ! -i docker0 -p tcp -m tcp --dport 9091 -j DNAT --to-destination 172.17.0.2:9095
+</code></pre>
+
+<p>通过DNAT转换,将访问宿主机9091端口的流量转到docker
+Filter表不同:</p>
+
+<pre><code class="language-bash">-A DOCKER -d 172.17.0.2/32 ! -i docker0 -o docker0 -p tcp -m tcp --dport 9095 -j ACCEPT
+</code></pre>
+
+<p>目的地址是172.17.0.2,端口是9095的外部数据可以通过</p>
+
+<h1 id="docker局限性">Docker局限性。</h1>
+
+<p>目前没有太好的跨主机支持.</p>
+
+                        </div>
+
+                        
+
+
+                        
+
+<div class="post-archive">
+    <h2>See Also</h2>
+    <ul class="listing">
+        
+        <li><a href="/post/2019/07/24/docker%E7%BD%91%E7%BB%9C%E5%9F%BA%E7%A1%80/">Docker网络基础</a></li>
+        
+        <li><a href="/books/">Books</a></li>
+        
+        <li><a href="/post/2019/07/23/%E5%87%A0%E7%A7%8Dio%E6%A8%A1%E5%9E%8B%E7%AD%89%E7%9A%84%E6%A6%82%E5%BF%B5%E4%B8%8E%E4%B8%8D%E5%90%8C/">几种IO模型等的概念与不同</a></li>
+        
+        <li><a href="/post/2019/07/23/linux%E7%9A%84io%E6%A8%A1%E5%9E%8B/">Linux的IO模型</a></li>
+        
+        <li><a href="/post/2019/07/23/%E5%9F%BA%E4%BA%8Edocker%E7%9A%84etcd%E9%9B%86%E7%BE%A4%E6%90%AD%E5%BB%BA/">基于Docker的Etcd集群搭建</a></li>
+        
+    </ul>
+</div>
+
+
+                        <div class="post-meta meta-tags">
+                            
+                            <ul class="clearfix">
+                                
+                                <li><a href="https://yuehao1995.github.io/tags/docker%E7%BD%91%E7%BB%9C%E5%8E%9F%E7%90%86">docker网络原理</a></li>
+                                
+                            </ul>
+                            
+                        </div>
+                    </article>
+                    
+    
+
+    
+    
+                </div>
+            </div>
+            <div id="secondary">
+    <section class="widget">
+        <form id="search" action="//www.google.com/search" method="get" accept-charset="utf-8" target="_blank" _lpchecked="1">
+      
+      <input type="text" name="q" maxlength="20" placeholder="Search">
+      <input type="hidden" name="sitesearch" value="https://yuehao1995.github.io">
+      <button type="submit" class="submit icon-search"></button>
+</form>
+    </section>
+    
+    <section class="widget">
+        <h3 class="widget-title">最近文章</h3>
+<ul class="widget-list">
+    
+    <li>
+        <a href="https://yuehao1995.github.io/post/2019/07/24/docker%E7%BD%91%E7%BB%9C%E5%8E%9F%E7%90%86/" title="Docker网络原理">Docker网络原理</a>
+    </li>
+    
+    <li>
+        <a href="https://yuehao1995.github.io/post/2019/07/24/docker%E7%BD%91%E7%BB%9C%E5%9F%BA%E7%A1%80/" title="Docker网络基础">Docker网络基础</a>
+    </li>
+    
+    <li>
+        <a href="https://yuehao1995.github.io/post/2019/07/23/%E5%87%A0%E7%A7%8Dio%E6%A8%A1%E5%9E%8B%E7%AD%89%E7%9A%84%E6%A6%82%E5%BF%B5%E4%B8%8E%E4%B8%8D%E5%90%8C/" title="几种IO模型等的概念与不同">几种IO模型等的概念与不同</a>
+    </li>
+    
+    <li>
+        <a href="https://yuehao1995.github.io/post/2019/07/23/linux%E7%9A%84io%E6%A8%A1%E5%9E%8B/" title="Linux的IO模型">Linux的IO模型</a>
+    </li>
+    
+    <li>
+        <a href="https://yuehao1995.github.io/post/2019/07/23/%E5%9F%BA%E4%BA%8Edocker%E7%9A%84etcd%E9%9B%86%E7%BE%A4%E6%90%AD%E5%BB%BA/" title="基于Docker的Etcd集群搭建">基于Docker的Etcd集群搭建</a>
+    </li>
+    
+</ul>
+    </section>
+
+    
+
+    <section class="widget">
+        <h3 class="widget-title">分类</h3>
+<ul class="widget-list">
+    
+    <li>
+        <a href="https://yuehao1995.github.io/categories/about/">about(1)</a>
+    </li>
+    
+    <li>
+        <a href="https://yuehao1995.github.io/categories/archives/">archives(1)</a>
+    </li>
+    
+    <li>
+        <a href="https://yuehao1995.github.io/categories/docker/">docker(2)</a>
+    </li>
+    
+    <li>
+        <a href="https://yuehao1995.github.io/categories/linux/">linux(2)</a>
+    </li>
+    
+    <li>
+        <a href="https://yuehao1995.github.io/categories/%E8%AF%BB%E4%B9%A6/">读书(1)</a>
+    </li>
+    
+    <li>
+        <a href="https://yuehao1995.github.io/categories/%E9%83%A8%E7%BD%B2/">部署(1)</a>
+    </li>
+    
+</ul>
+    </section>
+
+    <section class="widget">
+        <h3 class="widget-title">标签</h3>
+<div class="tagcloud">
+    
+    <a href="https://yuehao1995.github.io/tags/about/">about</a>
+    
+    <a href="https://yuehao1995.github.io/tags/arcgives/">arcgives</a>
+    
+    <a href="https://yuehao1995.github.io/tags/docker%E7%BD%91%E7%BB%9C%E5%8E%9F%E7%90%86/">docker网络原理</a>
+    
+    <a href="https://yuehao1995.github.io/tags/etcd/">etcd</a>
+    
+    <a href="https://yuehao1995.github.io/tags/i/o/">i/o</a>
+    
+    <a href="https://yuehao1995.github.io/tags/%E8%AF%BB%E4%B9%A6/">读书</a>
+    
+</div>
+    </section>
+
+    
+
+    <section class="widget">
+        <h3 class="widget-title">其它</h3>
+        <ul class="widget-list">
+            <li><a href="https://yuehao1995.github.io/index.xml">文章 RSS</a></li>
+        </ul>
+    </section>
+</div>
+        </div>
+    </div>
+</div>
+<footer id="footer">
+    <div class="container">
+        &copy; 2019 <a href="https://yuehao1995.github.io">张岳灏的博客 By 张岳灏</a>.
+        Powered by <a rel="nofollow noreferer noopener" href="https://gohugo.io" target="_blank">Hugo</a>.
+        <a href="https://www.flysnow.org/" target="_blank">Theme</a> based on <a href="https://github.com/rujews/maupassant-hugo" target="_blank">maupassant</a>.
+        
+    </div>
+</footer>
+
+
+    <script type="text/javascript">
+    
+    (function(){
+        $("pre code").parent().addClass("line-numbers")
+    }())
+
+    window.MathJax = {
+        tex2jax: {
+            inlineMath: [ ['$','$'] ],
+            processEscapes: true
+        }
+    };
+    </script>
+    <script type="text/javascript" src="/js/prism.js" async="true"></script>
+    <script src='https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.5/MathJax.js?config=TeX-MML-AM_CHTML' async></script>
+
+<a id="rocket" href="#top"></a>
+<script type="text/javascript" src="/js/totop.js?v=0.0.0" async=""></script>
+
+
+
+
+
+
+</body>
+</html>
