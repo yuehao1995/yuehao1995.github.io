@@ -109,11 +109,14 @@ Socket I/O事件的处理过程中，要使用到sock上的两个队列：等待
 
 <h3 id="1-1-对等待队列的使用">1.1 对等待队列的使用</h3>
 
-<p>Linux通过socket睡眠队列来管理所有等待socket的某个事件的进程，同时通过wakeup机制来异步唤醒整个睡眠队列上等待事件的进程，通知进程相关事件发生。
-通常一个进程会在等待队列上发生以下步骤：
-- select、poll、epoll_wait陷入内核，判断监控的socket是否有关心的事件发生了，如果没，则为当前进程构建一个wait_entry节点，然后插入到监控socket的sleep_list
-- 进入循环的schedule直到关心的事件发生了
-- socket的事件发生了，然后socket顺序遍历其睡眠队列，依次调用每个wait_entry节点的callback函数</p>
+<p>Linux通过socket睡眠队列来管理所有等待socket的某个事件的进程，同时通过wakeup机制来异步唤醒整个睡眠队列上等待事件的进程，通知进程相关事件发生。<br />
+通常一个进程会在等待队列上发生以下步骤:</p>
+
+<ul>
+<li>select、poll、epoll_wait陷入内核，判断监控的socket是否有关心的事件发生了，如果没，则为当前进程构建一个wait_entry节点，然后插入到监控socket的sleep_list</li>
+<li>进入循环的schedule直到关心的事件发生了</li>
+<li>socket的事件发生了，然后socket顺序遍历其睡眠队列，依次调用每个wait_entry节点的callback函数</li>
+</ul>
 
 <h2 id="2-对比与介绍">2 对比与介绍</h2>
 
@@ -125,14 +128,21 @@ Socket I/O事件的处理过程中，要使用到sock上的两个队列：等待
 
 <p>select 同时插入并阻塞在N个socket的sleep_list上等待任意一个socket可读事件发生而被唤醒，当select被唤醒的时候，其callback里面有个逻辑去检查具体哪些socket可读了。<br />
 实际上select为每个socket引入一个poll逻辑，该poll逻辑用于收集socket发生的事件。
-下面介绍调用select并且关注读取事件的过程:
-1. select会将需要监控的readfds集合拷贝到内核空间
-2. select遍历自己监控的socket sk，挨个调用sk的poll逻辑以便检查该sk是否有可读事件，遍历完所有的sk后，如果没有任何一个sk可读，那么select会调用schedule_timeout进入schedule循环，使得process进入睡眠
-3. 如果在timeout时间内某个sk上有数据可读了，或者等待timeout了，则调用select的process会被唤醒，接下来select就是遍历监控的sk集合，挨个收集可读事件并返回给用户
-实际上select有以下三个问题：
-1. 被监控的fds需要从用户空间拷贝到内核空间
-2. 被监控的fds集合限制为1024
-3. 每次通知事件，我们都需要遍历整个可读等事件列表</p>
+下面介绍调用select并且关注读取事件的过程:</p>
+
+<ol>
+<li>select会将需要监控的readfds集合拷贝到内核空间</li>
+<li>select遍历自己监控的socket sk，挨个调用sk的poll逻辑以便检查该sk是否有可读事件，遍历完所有的sk后，如果没有任何一个sk可读，那么select会调用schedule_timeout进入schedule循环，使得process进入睡眠</li>
+<li>如果在timeout时间内某个sk上有数据可读了，或者等待timeout了，则调用select的process会被唤醒，接下来select就是遍历监控的sk集合，挨个收集可读事件并返回给用户<br /></li>
+</ol>
+
+<p>实际上select有以下三个问题：</p>
+
+<ol>
+<li>被监控的fds需要从用户空间拷贝到内核空间</li>
+<li>被监控的fds集合限制为1024</li>
+<li>每次通知事件，我们都需要遍历整个可读等事件列表</li>
+</ol>
 
 <h3 id="2-2-poll">2.2 poll</h3>
 
@@ -145,10 +155,13 @@ Socket I/O事件的处理过程中，要使用到sock上的两个队列：等待
 <p>epoll引入了epoll_ctl系统调用，将高频调用的epoll_wait和低频的epoll_ctl隔离开.
 对于高频epoll_wait的可读就绪的fd集合返回的拷贝问题，epoll通过内核与用户空间mmap(内存映射)同一块内存来解决.
 epoll通过引入了一个中间层，一个双向链表(ready_list)，一个单独的睡眠队列(single_epoll_wait_list)来组织那些已经就绪的fd。
-epoll工作过程
-1. epoll_wait插入到中间层的epoll的单独睡眠队列中，睡眠在epoll的单独队列上，等待事件的发生.
-2.wait_entry_sk作为中间层与某个socket sk密切相关，wait_entry_sk睡眠在sk的睡眠队列上，其callback函数逻辑是将当前sk排入到epoll的ready_list中，并唤醒epoll的single_epoll_wait_list。
-3. single_epoll_wait_list上睡眠的process的回调函数就明朗了：遍历ready_list上的所有sk，挨个调用sk的poll函数收集事件，然后唤醒process从epoll_wait返回。</p>
+epoll工作过程:</p>
+
+<ol>
+<li>epoll_wait插入到中间层的epoll的单独睡眠队列中，睡眠在epoll的单独队列上，等待事件的发生.
+2.wait_entry_sk作为中间层与某个socket sk密切相关，wait_entry_sk睡眠在sk的睡眠队列上，其callback函数逻辑是将当前sk排入到epoll的ready_list中，并唤醒epoll的single_epoll_wait_list。</li>
+<li>single_epoll_wait_list上睡眠的process的回调函数就明朗了：遍历ready_list上的所有sk，挨个调用sk的poll函数收集事件，然后唤醒process从epoll_wait返回。<br /></li>
+</ol>
 
 <h3 id="2-3-1-epoll-add及wait工作过程">2.3.1 epoll add及Wait工作过程</h3>
 
@@ -181,8 +194,8 @@ epoll工作过程
 
 <h3 id="参考资料">参考资料</h3>
 
-<p>unix高级编程
-<a href="https://cloud.tencent.com/developer/article/1005481">https://cloud.tencent.com/developer/article/1005481</a>
+<p>unix环境高级编程<br />
+<a href="https://cloud.tencent.com/developer/article/1005481">https://cloud.tencent.com/developer/article/1005481</a><br />
 <a href="https://blog.csdn.net/zhangskd/article/details/45770323">https://blog.csdn.net/zhangskd/article/details/45770323</a></p>
 
                         </div>
