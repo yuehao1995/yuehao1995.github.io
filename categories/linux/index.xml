@@ -35,7 +35,7 @@
       <pubDate>Tue, 23 Jul 2019 16:44:07 +0800</pubDate>
       
       <guid>https://yuehao1995.github.io/post/2019/07/23/linux%E7%9A%84io%E6%A8%A1%E5%9E%8B/</guid>
-      <description>&lt;h1 id=&#34;linux的五种i-o模型&#34;&gt;Linux的五种I/O模型&lt;/h1&gt;</description>
+      <description>Linux的五种I/O模型 一次I/O访问中，数据会先被拷贝到操作系统内核的缓冲区中，然后才会从操作系统内核的缓冲区拷贝到应用程序的地址空间。</description>
     </item>
     
   </channel>

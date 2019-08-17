@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>分布式通信 on 张岳灏的博客</title>
+    <link>https://yuehao1995.github.io/categories/%E5%88%86%E5%B8%83%E5%BC%8F%E9%80%9A%E4%BF%A1/</link>
+    <description>Recent content in 分布式通信 on 张岳灏的博客</description>
+    <generator>Hugo -- gohugo.io</generator>
+    <language>zh-CN</language>
+    <lastBuildDate>Thu, 15 Aug 2019 16:05:03 +0800</lastBuildDate>
+    
+	<atom:link href="https://yuehao1995.github.io/categories/%E5%88%86%E5%B8%83%E5%BC%8F%E9%80%9A%E4%BF%A1/index.xml" rel="self" type="application/rss+xml" />
+    
+    
+    <item>
+      <title>Gossip协议及其库的使用</title>
+      <link>https://yuehao1995.github.io/post/2019/08/15/gossip%E5%8D%8F%E8%AE%AE%E5%8F%8A%E5%85%B6%E5%BA%93%E7%9A%84%E4%BD%BF%E7%94%A8/</link>
+      <pubDate>Thu, 15 Aug 2019 16:05:03 +0800</pubDate>
+      
+      <guid>https://yuehao1995.github.io/post/2019/08/15/gossip%E5%8D%8F%E8%AE%AE%E5%8F%8A%E5%85%B6%E5%BA%93%E7%9A%84%E4%BD%BF%E7%94%A8/</guid>
+      <description>Gossip协议 简介 在一个有界网络中，每个节点都随机地与其他节点通信，经过一番杂乱无章的通信，最终所有节点的状态都会达成一致。每个节点可能知</description>
+    </item>
+    
+  </channel>
+</rss>
