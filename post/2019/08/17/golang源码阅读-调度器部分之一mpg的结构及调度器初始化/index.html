@@ -1,0 +1,603 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+
+    <meta charset="utf-8">
+    <meta name="generator" content="Hugo 0.55.6" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <title>Golang源码阅读 调度器部分之一：M,P,G的结构及调度器初始化 | 张岳灏的博客</title>
+    <meta property="og:title" content="Golang源码阅读 调度器部分之一：M,P,G的结构及调度器初始化 - 张岳灏的博客">
+    <meta property="og:type" content="article">
+        
+    <meta property="article:published_time" content="2019-08-17T22:41:00&#43;08:00">
+        
+        
+    <meta property="article:modified_time" content="2019-08-17T22:41:00&#43;08:00">
+        
+    <meta name="Keywords" content="golang,go语言,go语言笔记,张岳灏,java,python,c,博客,计算机基础,计算机网络,操作系统,自动部署">
+    <meta name="description" content="Golang源码阅读 调度器部分之一：M,P,G的结构及调度器初始化">
+        <meta name="author" content="张岳灏">
+        
+    <meta property="og:url" content="https://yuehao1995.github.io/post/2019/08/17/golang%E6%BA%90%E7%A0%81%E9%98%85%E8%AF%BB-%E8%B0%83%E5%BA%A6%E5%99%A8%E9%83%A8%E5%88%86%E4%B9%8B%E4%B8%80mpg%E7%9A%84%E7%BB%93%E6%9E%84%E5%8F%8A%E8%B0%83%E5%BA%A6%E5%99%A8%E5%88%9D%E5%A7%8B%E5%8C%96/">
+    <link rel="shortcut icon" href="/favicon.ico" type="image/x-icon">
+
+    <link rel="stylesheet" href="/css/normalize.css">
+    
+        <link rel="stylesheet" href="/css/prism.css">
+    
+    <link rel="stylesheet" href="/css/style.css">
+    <script type="text/javascript" src="//cdn.bootcss.com/jquery/3.2.1/jquery.min.js"></script>
+
+    
+
+
+    
+    
+</head>
+
+<body>
+<header id="header" class="clearfix">
+    <div class="container">
+        <div class="col-group">
+            <div class="site-name ">
+                
+                    <a id="logo" href="https://yuehao1995.github.io">
+                        张岳灏的博客
+                    </a>
+                
+                <p class="description">专注于Go语言(golang)、在积极学习网络，linux内核，容器及虚拟化等</p>
+            </div>
+            <div>
+                <nav id="nav-menu" class="clearfix">
+                    <a class="current" href="https://yuehao1995.github.io">首页</a>
+                    
+                    <a  href="https://yuehao1995.github.io/books/" title="读书笔记">读书笔记</a>
+                    
+                    <a  href="https://yuehao1995.github.io/archives/" title="归档">归档</a>
+                    
+                    <a  href="https://yuehao1995.github.io/about/" title="关于">关于</a>
+                    
+                </nav>
+            </div>
+        </div>
+    </div>
+</header>
+
+
+<div id="body">
+    <div class="container">
+        <div class="col-group">
+
+            <div class="col-8" id="main">
+                <div class="res-cons">
+                    <article class="post">
+                        <header>
+                            <h1 class="post-title">Golang源码阅读 调度器部分之一：M,P,G的结构及调度器初始化</h1>
+                        </header>
+                        <date class="post-meta meta-date">
+                            2019年8月17日
+                        </date>
+                        
+                        <div class="post-meta">
+                            <span>|</span>
+                            
+                                <span class="meta-category"><a href="https://yuehao1995.github.io/categories/golang">golang</a></span>
+                            
+                        </div>
+                        
+                        
+                        
+                        <div class="post-content">
+                            
+
+<h1 id="m-p-g的结构及调度器初始化">M,P,G的结构及调度器初始化</h1>
+
+<h2 id="m-p-g及调度器schedt的结构">M,P,G及调度器schedt的结构</h2>
+
+<p>代码位置runtime/runtime2.go,我这里只将m中与p和G及调度相关的部分列出来</p>
+
+<h3 id="m的结构">M的结构</h3>
+
+<pre><code>type m struct{
+    g0            *g  //主os线程 
+    curg          *g  //当前正运行的G
+    spinning      bool //m当前没有运行 work且正处于寻找work的活跃状态
+    p             puintptr  //绑定的p
+}
+</code></pre>
+
+<h3 id="p的结构">P的结构</h3>
+
+<pre><code>type p struct{
+    m           muintptr  //p反向链接的m
+
+// 可运行的G队列
+    runqhead uint32
+    runqtail uint32
+    runq     [256]guintptr
+
+    gFree struct {       //结束了的g,复用
+	    gList
+	    n int32
+    }
+
+}
+</code></pre>
+
+<h3 id="g的结构">G的结构</h3>
+
+<pre><code>type g struct{
+    stack stack           //goroutine的栈内存
+......
+    m              *m    //当前的m
+.......
+    waiting        *sudog  //当前G等待其他G的队列,按照等待的序列      
+}
+</code></pre>
+
+<h3 id="schedt的结构">schedt的结构</h3>
+
+<pre><code>type schedt struct {
+// m相关
+    midle        muintptr // 空闲m链表
+    nmidle       int32    // 空闲m的数量
+    nmidlelocked int32    // 锁住的空闲m的数量
+    mnext        int64    // 已经创建的m的数量,下一个创建的m的id
+    maxmcount    int32    // 允许的最多m的数量
+
+// p相关
+    pidle      puintptr // 空闲p链表
+    npidle     uint32 // 空闲p数量
+
+// G相关
+// G的id
+    goidgen  uint64
+// 全局可运行G队列
+    runq     gQueue
+    runqsize int32
+// 死亡dead状态的G缓存
+    gFree struct {
+		lock    mutex
+		stack   gList // 包含栈的 Gs
+		noStack gList // 没有栈的 Gs
+		n       int32
+    }
+// 阻塞G的集中缓存
+    sudoglock  mutex
+    sudogcache *sudog
+}
+</code></pre>
+
+<h2 id="调度器初始化">调度器初始化</h2>
+
+<p>M/P/G彼此的初始化顺序遵循：mcommoninit &ndash;&gt; procresize &ndash;&gt; newproc。代码位置<code>runtime/proc.go</code></p>
+
+<h3 id="m初始化">M初始化</h3>
+
+<p>M是OS线程,有两个状态:自旋,非自旋。</p>
+
+<p>如果一个工作线程的本地队列、全局运行队列或 netpoller中均没有工作，则该线程成为自旋线程。</p>
+
+<p>自旋一段时间后,从per-P中运行队列中寻找工作。如果一个自旋进程发现工作,就会将自身切换出自旋状态,并且开始执行。如果它没有发现工作则会将自己进行暂止。</p>
+
+<p>调度器初始化时,只有主线程m,mcommoninit对主线程m进行了初始化,并加入了全局allm</p>
+
+<pre><code>func mcommoninit(mp *m) {
+......
+    lock(&amp;sched.lock)
+// 初始化了一下id,增加调度器中m数量,并检查m数量
+    mp.id = sched.mnext
+    sched.mnext++
+    checkmcount()
+......
+// 加入allm
+    mp.alllink = allm
+......
+    unlock(&amp;sched.lock)
+......
+}
+</code></pre>
+
+<h3 id="p初始化">P初始化</h3>
+
+<p>P有以下5个状态:</p>
+
+<ul>
+<li>_Pidle</li>
+<li>_Prunning</li>
+<li>_Psyscall</li>
+<li>_Pgcstop</li>
+<li>_Pdead</li>
+</ul>
+
+<p>当程序刚开始运行进行初始化时,所有的P都处于_Pgcstop状态,随着P的初始化(runtime.procresize),会被置于_Pidle。<br />
+当M需要运行时,会runtime.acquirep,并通过 runtime.releasep来释放。<br />
+当G执行时需要进入系统调用时,P会被设置为_Psyscall,如果这个时候被系统监控抢夺(runtime.retake),则P会被重新修改为_Pidle.如果在程序运行中发生GC,则P会被设置为_Pgcstop,并在runtime.startTheWorld 时重新调整为_Pidle或者_Prunning</p>
+
+<p>p的初始化主要发生了以下几个事情:<br />
+1. 记录修改p的时间到调度器<br />
+2. 调整默认allp(默认为cpu核数)等于nprocs(我们通过runtime.GOMAXPROCS()函数设置的p)<br />
+3. 初始化一下allp中的p<br />
+4. 修剪p<br />
+5. 如果当前p没被修剪,继续运行;否则,将当前p换为allp[0]<br />
+6. 遍历p,没有任务的放到调度器sched的空闲链表pidle。有任务的p获取一个m绑定,并串成一个链表返回。</p>
+
+<h3 id="g及主goroutine的初始化">G及主goroutine的初始化</h3>
+
+<p>当调度器初始化之后,主goroutine开始被调度器调度。由newproc()来完成主 goroutine的初始化工作。</p>
+
+<p>G的状态如有以下部分：<br />
+- _Gidle<br />
+- _Grunnable<br />
+- _Grunning<br />
+- _Gsyscall<br />
+- _Gwaiting<br />
+- _Gdead<br />
+- _Gcopystack<br />
+- _Gscan<br />
+- _Gscanrunnable<br />
+- _Gscanrunning<br />
+- _Gscansyscall<br />
+- _Gscanwaiting</p>
+
+<p>在newproc()函数中主要获取了要创建的函数地址,参数起始地址,参数长度,g0,调用方地址。调用了newproc1函数。</p>
+
+<pre><code>newproc1(fn, (*uint8)(argp), siz, gp, pc)
+</code></pre>
+
+<p>下面对newproc1函数的工作做一下说明:<br />
+1. 获取调用goutine的p,并从gfree列表(包括p上的及调度器的gfree)获取g以复用g。实际上获取不到,所以创建了一个g,并添加到了allg中。<br />
+2. g的初始创建状态为_Gdead,当有参数时,将参数拷贝到goroutine的执行栈。<br />
+3. 初始化以下g,将G的初始地址定义好,然后将g的状态只为_Grunnable,分配一个goid。<br />
+4. 将新创建的g放入p的本地队列或全局g队列。<br />
+5. 如果有空闲的p，且自旋的m为0，且主函数已运行，那么唤醒p。</p>
+
+<p>具体代码如下：</p>
+
+<pre><code>func newproc1(fn *funcval, argp *uint8, narg int32, callergp *g, callerpc uintptr) {
+// 从p或全局队列获取gfree
+    newg := gfget(_p_)
+    if newg == nil {
+	    newg = malg(_StackMin)
+	    casgstatus(newg, _Gidle, _Gdead)
+	    allgadd(newg) // 将g放入allg
+    }
+// 判断是否有参数,如果有将参数拷贝到执行栈
+    if narg &gt; 0 {		              
+    memmove(unsafe.Pointer(spArg),      unsafe.Pointer(argp), uintptr(narg))
+    }
+// 定义好goroutine的初始指令地址,即函数地址
+    newg.startpc = fn.fn 
+// 修改状态为_Grunnable
+    casgstatus(newg, _Gdead, _Grunnable)
+// 分配并定义goroutine的id,goid
+    if _p_.goidcache == _p_.goidcacheend {
+	_p_.goidcache = atomic.Xadd64(&amp;sched.goidgen, _GoidCacheBatch)
+	_p_.goidcache -= _GoidCacheBatch - 1
+	_p_.goidcacheend = _p_.goidcache + _GoidCacheBatch
+    }
+    newg.goid = int64(_p_.goidcache)
+// 将这里新创建的g放入p的本地队列或直接放入全局队列
+// true表示放入执行队列的下一个,false表示放入队尾
+    runqput(_p_, newg, true)
+}
+</code></pre>
+
+<h4 id="下面对创建goroutine的newproc1这个函数中的几个终点部分分析一下">下面对创建goroutine的newproc1这个函数中的几个终点部分分析一下</h4>
+
+<p>首先,是从gfree中获取g,从而复用的gfget函数。<br />
+该函数重点做了以下工作：
+如果p中gfree不为空,那么尝试从p的gfree中获取,否则从调度器schedt的gfree获取。<br />
+p及schedt中的gfree都分为两种,一种是有栈的，另一个没有栈,在获取时更优先获取有栈的。</p>
+
+<pre><code>func gfget(_p_ *p) *g {
+retry:
+	if _p_.gFree.empty() &amp;&amp; (!sched.gFree.stack.empty() || !sched.gFree.noStack.empty()) {
+		lock(&amp;sched.gFree.lock)
+		// Move a batch of free Gs to the P.
+		for _p_.gFree.n &lt; 32 {
+			// Prefer Gs with stacks.
+			gp := sched.gFree.stack.pop()
+			if gp == nil {
+				gp = sched.gFree.noStack.pop()
+				if gp == nil {
+					break
+				}
+			}
+			sched.gFree.n--
+			_p_.gFree.push(gp)
+			_p_.gFree.n++
+		}
+		unlock(&amp;sched.gFree.lock)
+		goto retry
+	}
+	gp := _p_.gFree.pop()
+	if gp == nil {
+		return nil
+	}
+	_p_.gFree.n--
+	if gp.stack.lo == 0 {
+		// Stack was deallocated in gfput. Allocate a new one.
+		systemstack(func() {
+			gp.stack = stackalloc(_FixedStack)
+		})
+		gp.stackguard0 = gp.stack.lo + _StackGuard
+	} else {
+		if raceenabled {
+			racemalloc(unsafe.Pointer(gp.stack.lo), gp.stack.hi-gp.stack.lo)
+		}
+		if msanenabled {
+			msanmalloc(unsafe.Pointer(gp.stack.lo), gp.stack.hi-gp.stack.lo)
+		}
+	}
+	return gp
+}
+</code></pre>
+
+<p>然后,是将g放入p或者全局队列的函数runqput。<br />
+主要发生了以下工作：<br />
+1. 将g放入p的队列中。假如p中g队列runq已满,那么放入全局队列即调度器schedt的runq中<br />
+2. 在放入全局队列时,会从p队列中拿取一半的goroutine一起放入全局队列</p>
+
+<pre><code>// 判断放入p中还是放入全局队列
+func runqput(_p_ *p, gp *g, next bool) {
+......
+	h := atomic.LoadAcq(&amp;_p_.runqhead) // load-acquire, synchronize with consumers
+	t := _p_.runqtail
+	if t-h &lt; uint32(len(_p_.runq)) {
+		_p_.runq[t%uint32(len(_p_.runq))].set(gp)
+		atomic.StoreRel(&amp;_p_.runqtail, t+1) // store-release, makes the item available for consumption
+		return
+	}
+	if runqputslow(_p_, gp, h, t) {
+		return
+	}
+}
+
+// 从p的G数组runq中拿取一半goroutine,并将最开始的g也放入batch[n]中
+func runqputslow(_p_ *p, gp *g, h, t uint32) bool {
+ar batch [len(_p_.runq)/2 + 1]*g
+
+	// First, grab a batch from local queue.
+	n := t - h
+	n = n / 2
+	if n != uint32(len(_p_.runq)/2) {
+		throw(&quot;runqputslow: queue is not full&quot;)
+	}
+	for i := uint32(0); i &lt; n; i++ {
+		batch[i] = _p_.runq[(h+i)%uint32(len(_p_.runq))].ptr()
+	}
+	if !atomic.CasRel(&amp;_p_.runqhead, h, h+n) { // cas-release, commits consume
+		return false
+	}
+	batch[n] = gp
+......
+globrunqputbatch(&amp;q, int32(n+1))
+.....
+}
+
+// 批量放入全局队列
+func globrunqputbatch(batch *gQueue, n int32) {
+	sched.runq.pushBackAll(*batch)
+	sched.runqsize += n
+	*batch = gQueue{}
+}
+</code></pre>
+
+                        </div>
+
+                        
+
+
+                        
+
+<div class="post-archive">
+    <h2>See Also</h2>
+    <ul class="listing">
+        
+        <li><a href="/post/2019/08/15/gossip%E5%8D%8F%E8%AE%AE%E5%8F%8A%E5%85%B6%E5%BA%93%E7%9A%84%E4%BD%BF%E7%94%A8/">Gossip协议及其库的使用</a></li>
+        
+        <li><a href="/post/2019/08/15/io%E5%A4%9A%E8%B7%AF%E5%A4%8D%E7%94%A8/">IO多路复用</a></li>
+        
+        <li><a href="/post/2019/07/24/docker%E7%BD%91%E7%BB%9C%E5%8E%9F%E7%90%86/">Docker网络原理</a></li>
+        
+        <li><a href="/post/2019/07/24/docker%E7%BD%91%E7%BB%9C%E5%9F%BA%E7%A1%80/">Docker网络基础</a></li>
+        
+        <li><a href="/books/">Books</a></li>
+        
+    </ul>
+</div>
+
+
+                        <div class="post-meta meta-tags">
+                            
+                            <ul class="clearfix">
+                                
+                                <li><a href="https://yuehao1995.github.io/tags/%E6%BA%90%E7%A0%81%E9%98%85%E8%AF%BB">源码阅读</a></li>
+                                
+                            </ul>
+                            
+                        </div>
+                    </article>
+                    
+    
+
+    
+    
+                </div>
+            </div>
+            <div id="secondary">
+    <section class="widget">
+        <form id="search" action="//www.google.com/search" method="get" accept-charset="utf-8" target="_blank" _lpchecked="1">
+      
+      <input type="text" name="q" maxlength="20" placeholder="Search">
+      <input type="hidden" name="sitesearch" value="https://yuehao1995.github.io">
+      <button type="submit" class="submit icon-search"></button>
+</form>
+    </section>
+    
+    <section class="widget">
+        <h3 class="widget-title">最近文章</h3>
+<ul class="widget-list">
+    
+    <li>
+        <a href="https://yuehao1995.github.io/post/2019/08/17/golang%E6%BA%90%E7%A0%81%E9%98%85%E8%AF%BB%E8%B0%83%E5%BA%A6%E5%99%A8%E9%83%A8%E5%88%86%E4%B9%8B%E4%BA%8C%E8%B0%83%E5%BA%A6%E5%BE%AA%E7%8E%AF/" title="Golang源码阅读调度器部分之二：调度循环">Golang源码阅读调度器部分之二：调度循环</a>
+    </li>
+    
+    <li>
+        <a href="https://yuehao1995.github.io/post/2019/08/17/golang%E6%BA%90%E7%A0%81%E9%98%85%E8%AF%BB-%E8%B0%83%E5%BA%A6%E5%99%A8%E9%83%A8%E5%88%86%E4%B9%8B%E4%B8%80mpg%E7%9A%84%E7%BB%93%E6%9E%84%E5%8F%8A%E8%B0%83%E5%BA%A6%E5%99%A8%E5%88%9D%E5%A7%8B%E5%8C%96/" title="Golang源码阅读 调度器部分之一：M,P,G的结构及调度器初始化">Golang源码阅读 调度器部分之一：M,P,G的结构及调度器初始化</a>
+    </li>
+    
+    <li>
+        <a href="https://yuehao1995.github.io/post/2019/08/15/gossip%E5%8D%8F%E8%AE%AE%E5%8F%8A%E5%85%B6%E5%BA%93%E7%9A%84%E4%BD%BF%E7%94%A8/" title="Gossip协议及其库的使用">Gossip协议及其库的使用</a>
+    </li>
+    
+    <li>
+        <a href="https://yuehao1995.github.io/post/2019/08/15/io%E5%A4%9A%E8%B7%AF%E5%A4%8D%E7%94%A8/" title="IO多路复用">IO多路复用</a>
+    </li>
+    
+    <li>
+        <a href="https://yuehao1995.github.io/post/2019/07/24/docker%E7%BD%91%E7%BB%9C%E5%8E%9F%E7%90%86/" title="Docker网络原理">Docker网络原理</a>
+    </li>
+    
+    <li>
+        <a href="https://yuehao1995.github.io/post/2019/07/24/docker%E7%BD%91%E7%BB%9C%E5%9F%BA%E7%A1%80/" title="Docker网络基础">Docker网络基础</a>
+    </li>
+    
+    <li>
+        <a href="https://yuehao1995.github.io/post/2019/07/23/%E5%87%A0%E7%A7%8Dio%E6%A8%A1%E5%9E%8B%E7%AD%89%E7%9A%84%E6%A6%82%E5%BF%B5%E4%B8%8E%E4%B8%8D%E5%90%8C/" title="几种IO模型等的概念与不同">几种IO模型等的概念与不同</a>
+    </li>
+    
+    <li>
+        <a href="https://yuehao1995.github.io/post/2019/07/23/linux%E7%9A%84io%E6%A8%A1%E5%9E%8B/" title="Linux的IO模型">Linux的IO模型</a>
+    </li>
+    
+    <li>
+        <a href="https://yuehao1995.github.io/post/2019/07/23/%E5%9F%BA%E4%BA%8Edocker%E7%9A%84etcd%E9%9B%86%E7%BE%A4%E6%90%AD%E5%BB%BA/" title="基于Docker的Etcd集群搭建">基于Docker的Etcd集群搭建</a>
+    </li>
+    
+</ul>
+    </section>
+
+    
+
+    <section class="widget">
+        <h3 class="widget-title">分类</h3>
+<ul class="widget-list">
+    
+    <li>
+        <a href="https://yuehao1995.github.io/categories//">(1)</a>
+    </li>
+    
+    <li>
+        <a href="https://yuehao1995.github.io/categories/about/">about(1)</a>
+    </li>
+    
+    <li>
+        <a href="https://yuehao1995.github.io/categories/archives/">archives(1)</a>
+    </li>
+    
+    <li>
+        <a href="https://yuehao1995.github.io/categories/docker/">docker(2)</a>
+    </li>
+    
+    <li>
+        <a href="https://yuehao1995.github.io/categories/golang/">golang(1)</a>
+    </li>
+    
+    <li>
+        <a href="https://yuehao1995.github.io/categories/linux/">linux(3)</a>
+    </li>
+    
+    <li>
+        <a href="https://yuehao1995.github.io/categories/%E5%88%86%E5%B8%83%E5%BC%8F%E9%80%9A%E4%BF%A1/">分布式通信(1)</a>
+    </li>
+    
+    <li>
+        <a href="https://yuehao1995.github.io/categories/%E8%AF%BB%E4%B9%A6/">读书(1)</a>
+    </li>
+    
+    <li>
+        <a href="https://yuehao1995.github.io/categories/%E9%83%A8%E7%BD%B2/">部署(1)</a>
+    </li>
+    
+</ul>
+    </section>
+
+    <section class="widget">
+        <h3 class="widget-title">标签</h3>
+<div class="tagcloud">
+    
+    <a href="https://yuehao1995.github.io/tags//"></a>
+    
+    <a href="https://yuehao1995.github.io/tags/about/">about</a>
+    
+    <a href="https://yuehao1995.github.io/tags/archives/">archives</a>
+    
+    <a href="https://yuehao1995.github.io/tags/docker%E7%BD%91%E7%BB%9C%E5%8E%9F%E7%90%86/">docker网络原理</a>
+    
+    <a href="https://yuehao1995.github.io/tags/etcd/">etcd</a>
+    
+    <a href="https://yuehao1995.github.io/tags/gossip/">gossip</a>
+    
+    <a href="https://yuehao1995.github.io/tags/i/o/">i/o</a>
+    
+    <a href="https://yuehao1995.github.io/tags/i/o%E5%A4%9A%E8%B7%AF%E5%A4%8D%E7%94%A8/">i/o多路复用</a>
+    
+    <a href="https://yuehao1995.github.io/tags/%E6%BA%90%E7%A0%81%E9%98%85%E8%AF%BB/">源码阅读</a>
+    
+    <a href="https://yuehao1995.github.io/tags/%E8%AF%BB%E4%B9%A6/">读书</a>
+    
+</div>
+    </section>
+
+    
+
+    <section class="widget">
+        <h3 class="widget-title">其它</h3>
+        <ul class="widget-list">
+            <li><a href="https://yuehao1995.github.io/index.xml">文章 RSS</a></li>
+        </ul>
+    </section>
+</div>
+        </div>
+    </div>
+</div>
+<footer id="footer">
+    <div class="container">
+        &copy; 2019 <a href="https://yuehao1995.github.io">张岳灏的博客 By 张岳灏</a>.
+        Powered by <a rel="nofollow noreferer noopener" href="https://gohugo.io" target="_blank">Hugo</a>.
+        <a href="https://www.flysnow.org/" target="_blank">Theme</a> based on <a href="https://github.com/rujews/maupassant-hugo" target="_blank">maupassant</a>.
+        
+    </div>
+</footer>
+
+
+    <script type="text/javascript">
+    
+    (function(){
+        $("pre code").parent().addClass("line-numbers")
+    }())
+
+    window.MathJax = {
+        tex2jax: {
+            inlineMath: [ ['$','$'] ],
+            processEscapes: true
+        }
+    };
+    </script>
+    <script type="text/javascript" src="/js/prism.js" async="true"></script>
+    <script src='https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.5/MathJax.js?config=TeX-MML-AM_CHTML' async></script>
+
+<a id="rocket" href="#top"></a>
+<script type="text/javascript" src="/js/totop.js?v=0.0.0" async=""></script>
+
+
+
+
+
+
+</body>
+</html>
